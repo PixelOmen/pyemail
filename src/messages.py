@@ -37,7 +37,11 @@ class PyMsg:
         self.recipients = self.message.get_all('To', [])
         self.sender = self.message.get('From', "")
         self.subject = self.message.get('Subject', "")
-        self.body = self.message.get_payload(decode=True).decode("utf-8").replace("\r\n", "\n")
+        body = self.message.get_payload(decode=True)
+        if body is None:
+            self.body = ""
+        else:
+            self.body = body.decode("utf-8").replace("\r\n", "\n")
 
     def pull(self, retry: bool=False) -> None:
         if self._pulled and not retry:
