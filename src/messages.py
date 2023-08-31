@@ -1,6 +1,8 @@
+import email.utils
 from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
+    from datetime import datetime
     from .coms import Connection, Message
 
 class PyMsg:
@@ -13,11 +15,16 @@ class PyMsg:
         self.sender = ""
         self.subject = ""
         self.body = ""
-        self._message: Union[Message, None] = None
+        self.deleted: bool = False
+        self._rawdate = ""
+        self._date: datetime | None = None
+        self._message: Union["Message", None] = None
         self._pulled: bool = False
 
     @property
     def exists(self) -> bool:
+        if self.deleted:
+            return False
         if self._message is not None:
             return True
         if self._pulled and self._message is None:
@@ -30,13 +37,23 @@ class PyMsg:
         if not self.exists:
             raise ValueError(f"Email does not exist - {self.id}")
         return self._message #type: ignore
+
+    @property
+    def date(self) -> "datetime":
+        if self._date is not None:
+            return self._date
+        if not self.exists:
+            raise ValueError(f"Email does not exist - {self.id}")
+        self._date = email.utils.parsedate_to_datetime(self._rawdate).replace(tzinfo=None)
+        return self._date
     
     def _parse_msg(self) -> None:
         if not self.exists:
             return
-        self.recipients = self.message.get_all('To', [])
-        self.sender = self.message.get('From', "")
-        self.subject = self.message.get('Subject', "")
+        self.recipients = [str(result) for result in self.message.get_all('To', [])]
+        self.sender = str(self.message.get('From', ""))
+        self.subject = str(self.message.get('Subject', ""))
+        self._rawdate = str(self.message.get('Date', ""))
         body = self.message.get_payload(decode=True)
         if body is None:
             self.body = ""
@@ -53,3 +70,7 @@ class PyMsg:
 
     def mark_read(self) -> None:
         self.connection.mark_read(self.id)
+
+    def delete(self) -> None:
+        self.connection.mail.store(self.id, '+FLAGS', '\\Deleted')
+        self.deleted = True
