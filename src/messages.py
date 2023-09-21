@@ -73,4 +73,5 @@ class PyMsg:
 
     def delete(self) -> None:
         self.connection.mail.store(self.id, '+FLAGS', '\\Deleted')
+        self.connection.mail.expunge()
         self.deleted = True
