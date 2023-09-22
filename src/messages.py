@@ -71,6 +71,9 @@ class PyMsg:
     def mark_read(self) -> None:
         self.connection.mark_read(self.id)
 
+    def mark_unread(self) -> None:
+        self.connection.mark_unread(self.id)
+
     def delete(self) -> None:
         self.connection.mail.store(self.id, '+FLAGS', '\\Deleted')
         self.connection.mail.expunge()

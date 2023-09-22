@@ -38,6 +38,9 @@ class Connection:
     def mark_read(self, email_id: str) -> None:
         self.mail.store(email_id, '+FLAGS', '\\Seen')
 
+    def mark_unread(self, email_id: str) -> None:
+        self.mail.store(email_id, '-FLAGS', '\\Seen')
+
     def get_email(self, email_id: str) -> Union["Message", None]:
         _, data = self.mail.fetch(email_id, '(RFC822)')
         if not data[0]:
