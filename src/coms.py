@@ -30,8 +30,15 @@ class Connection:
         self._connection.logout()
         self._connection = None
 
-    def get_ids(self, unread: bool=False) -> list[str]:
-        search_flag = "UNSEEN" if unread else "ALL"
+    def get_ids(self, unread_only: bool=False, read_only: bool=False) -> list[str]:
+        if unread_only and read_only:
+            raise ValueError("Connection.get_ids: Cannot set both unread_only and read_only to True")
+        elif read_only:
+            search_flag = "SEEN"
+        elif unread_only:
+            search_flag = "UNSEEN"
+        else:
+            search_flag = "ALL"
         email_data: list[bytes] = self.mail.search(None, search_flag)[1]
         return [email_id.decode() for email_id in email_data[0].split()]
     
