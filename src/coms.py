@@ -1,5 +1,4 @@
 import imaplib
-from threading import Lock
 from email import message_from_bytes
 from typing import TYPE_CHECKING, Union
 
@@ -12,29 +11,24 @@ class Connection:
         self.pw: str = pw
         self.server: str = server
         self.mailbox: str = mailbox
-        self.login_lock = Lock()
-        self.connection_lock = Lock()
         self._connection: imaplib.IMAP4_SSL | None = None
 
     @property
     def mail(self) -> imaplib.IMAP4_SSL:
-        with self.connection_lock:
-            if self._connection is None:
-                self.login()
-            return self._connection #type: ignore
+        if self._connection is None:
+            self.login()
+        return self._connection #type: ignore
 
     def login(self) -> None:
-        with self.login_lock:
-            self._connection = imaplib.IMAP4_SSL(self.server)
-            self._connection.login(self.user, self.pw)
-            self._connection.select(self.mailbox)
+        self._connection = imaplib.IMAP4_SSL(self.server)
+        self._connection.login(self.user, self.pw)
+        self._connection.select(self.mailbox)
     
     def logout(self) -> None:
-        with self.login_lock:
-            if self._connection is None:
-                return
-            self._connection.logout()
-            self._connection = None
+        if self._connection is None:
+            return
+        self._connection.logout()
+        self._connection = None
 
     def get_ids(self, unread: bool=False) -> list[str]:
         search_flag = "UNSEEN" if unread else "ALL"
