@@ -1,8 +1,11 @@
+import time
+import select
 import imaplib
 from email import message_from_bytes
 from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
+    from threading import Event
     from email.message import Message
 
 class Connection:
@@ -29,6 +32,28 @@ class Connection:
             return
         self._connection.logout()
         self._connection = None
+
+    def idle(self, stopevent: "Event", tag: bytes=b"A001") -> list[bytes]:
+        idlecmd = tag + b" IDLE\r\n"
+        self.mail.send(idlecmd)
+        first_response = self.mail.readline()
+        if first_response != b"+ idling\r\n":
+            raise IOError(f"Didn't enter idle: {first_response}")
+        unsolicted = []
+        while not stopevent.is_set():
+            rlist, _, _ = select.select([self.mail.sock], [], [], 1)
+            if not rlist:
+                continue
+            unsolicted = [self.mail.readline()]
+            if unsolicted[-1].startswith(b'* '):
+                self.mail.send(b"DONE\r\n")
+                while True:
+                    if unsolicted[-1].startswith(tag):
+                        unsolicted.pop()
+                        break
+                    unsolicted.append(self.mail.readline())
+                break
+        return unsolicted
 
     def get_ids(self, unread_only: bool=False, read_only: bool=False) -> list[str]:
         if unread_only and read_only:
