@@ -56,9 +56,9 @@ class Connection:
                         if memoryguard > 10:
                             if logger is not ...:
                                 logger.warning("pyemail.Connection.idle - Memoryguard triggered")
-                                logger.warning("Unsolicted messages:")
+                                logger.debug("Unsolicted messages:")
                                 for msg in unsolicted:
-                                    logger.warning(msg)
+                                    logger.debug(msg)
                             raise IOError("Memoryguard triggered")
                         unsolicted.append(self.mail.readline())
                         memoryguard += 1
