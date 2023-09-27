@@ -134,7 +134,7 @@ class Connection:
         while True:
             rlist, _, _ = select.select([self.mail.sock], [], [], 5)
             if not rlist:
-                raise IOError("Could not restart Connection.Idle - Timeout - No response from DONE on memoryguard/timeout")
+                raise IOError("Could not restart Connection.Idle - Could not verify status of connection")
             msg = self.mail.readline()
 
             # flushes any remaining messages
@@ -150,6 +150,7 @@ class Connection:
                     rlist, _, _ = select.select([self.mail.sock], [], [], 1)
                     attempts += 1
 
+            self.login()
             self.mail.send(idlecmd)
             first_response = self.mail.readline()
             if first_response != b"+ idling\r\n":
