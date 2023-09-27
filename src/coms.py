@@ -53,7 +53,7 @@ class Connection:
                         if unsolicted[-1].startswith(tag):
                             unsolicted.pop()
                             break
-                        if memoryguard > 100:
+                        if memoryguard > 10:
                             if logger is not ...:
                                 logger.warning("pyemail.Connection.idle - Memoryguard triggered")
                                 logger.warning("Unsolicted messages:")
