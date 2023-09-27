@@ -86,6 +86,9 @@ class Connection:
                         if logger is not ...:
                             logger.critical(e)
                         raise e
+                    else:
+                        if logger is not ...:
+                            logger.info("Idle restarted after memoryguard")
                     continue
                 break
         return unsolicted
