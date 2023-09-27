@@ -1,10 +1,10 @@
-import time
 import select
 import imaplib
 from email import message_from_bytes
 from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
+    from logging import Logger
     from threading import Event
     from email.message import Message
 
@@ -33,7 +33,7 @@ class Connection:
         self._connection.logout()
         self._connection = None
 
-    def idle(self, stopevent: "Event", tag: bytes=b"A001") -> list[bytes]:
+    def idle(self, stopevent: "Event", tag: bytes=b"A001", logger: "Logger"=...) -> list[bytes]:
         idlecmd = tag + b" IDLE\r\n"
         self.mail.send(idlecmd)
         first_response = self.mail.readline()
@@ -47,11 +47,24 @@ class Connection:
             unsolicted = [self.mail.readline()]
             if unsolicted[-1].startswith(b'* '):
                 self.mail.send(b"DONE\r\n")
-                while True:
-                    if unsolicted[-1].startswith(tag):
-                        unsolicted.pop()
-                        break
-                    unsolicted.append(self.mail.readline())
+                memoryguard = 0
+                try:
+                    while True:
+                        if unsolicted[-1].startswith(tag):
+                            unsolicted.pop()
+                            break
+                        if memoryguard > 100:
+                            if logger is not ...:
+                                logger.warning("Memoryguard triggered")
+                                logger.warning("Unsolicted messages:")
+                                for msg in unsolicted:
+                                    logger.warning(msg)
+                            raise IOError("Memoryguard triggered")
+                        unsolicted.append(self.mail.readline())
+                        memoryguard += 1
+                except IOError:
+                    unsolicted = []
+                    continue
                 break
         return unsolicted
 
