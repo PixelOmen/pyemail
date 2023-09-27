@@ -1,12 +1,16 @@
 import select
 import imaplib
 from email import message_from_bytes
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Any, Union
 
 if TYPE_CHECKING:
     from logging import Logger
     from threading import Event
     from email.message import Message
+
+class IdleTimeout(Exception):
+    def __call__(self, msg: str="") -> Any:
+        return super().__init__(msg)
 
 class Connection:
     def __init__(self, user: str, pw: str, server: str, mailbox: str="INBOX") -> None:
@@ -68,20 +72,36 @@ class Connection:
         first_response = self.mail.readline()
         if first_response != b"+ idling\r\n":
             raise IOError(f"Didn't enter idle: {first_response}")
+        
         unsolicted = []
         while not stopevent.is_set():
             rlist, _, _ = select.select([self.mail.sock], [], [], 1)
             if not rlist:
                 continue
             unsolicted = [self.mail.readline()]
+
             if unsolicted[-1].startswith(b'* '):
+                if unsolicted[-1] == b'* BYE connection timed out\r\n':
+                    if logger is not ...:
+                        logger.debug("Idle timed out")
+                    try:
+                        self._restart_idle(idlecmd)
+                    except IOError as e:
+                        if logger is not ...:
+                            logger.critical(e)
+                        raise e
+                    else:
+                        if logger is not ...:
+                            logger.debug("Idle restarted after timeout")
+                    continue
+
                 self.mail.send(b"DONE\r\n")
                 try:
                     self._flush_for_done(tag, unsolicted, logger)
                 except IOError:
                     unsolicted = []
                     try:
-                        self._restart_idle_memguard(idlecmd)
+                        self._restart_idle(idlecmd)
                     except IOError as e:
                         if logger is not ...:
                             logger.critical(e)
@@ -90,6 +110,7 @@ class Connection:
                         if logger is not ...:
                             logger.info("Idle restarted after memoryguard")
                     continue
+
                 break
         return unsolicted
 
@@ -109,23 +130,28 @@ class Connection:
             unsolicted.append(self.mail.readline())
             memoryguard += 1
 
-    def _restart_idle_memguard(self, idlecmd: bytes) -> None:
+    def _restart_idle(self, idlecmd: bytes) -> None:
         while True:
             rlist, _, _ = select.select([self.mail.sock], [], [], 5)
             if not rlist:
-                raise IOError("Could not restart Connection.Idle - Timeout - No response from DONE on memoryguard")
+                raise IOError("Could not restart Connection.Idle - Timeout - No response from DONE on memoryguard/timeout")
             msg = self.mail.readline()
+
+            # flushes any remaining messages
             if msg.startswith(b'* '):
                 attempts = 0
                 rlist, _, _ = select.select([self.mail.sock], [], [], 5)
                 while rlist is not None:
                     if attempts > 10:
                         raise IOError("Could not restart Connection.Idle - Too many messages after DONE on memoryguard")
-                    self.mail.readline()
+                    msg = self.mail.readline()
+                    if msg == b'':
+                        break
                     rlist, _, _ = select.select([self.mail.sock], [], [], 1)
                     attempts += 1
-                self.mail.send(idlecmd)
-                first_response = self.mail.readline()
-                if first_response != b"+ idling\r\n":
-                    raise IOError(f"Unable to restart idle after memoryguard - idle response: {first_response}")
-                break
+
+            self.mail.send(idlecmd)
+            first_response = self.mail.readline()
+            if first_response != b"+ idling\r\n":
+                raise IOError(f"Unable to restart idle after memoryguard/timeout - idle response: {first_response}")
+            break
