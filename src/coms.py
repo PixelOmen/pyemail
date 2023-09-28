@@ -131,28 +131,26 @@ class Connection:
             memoryguard += 1
 
     def _restart_idle(self, idlecmd: bytes) -> None:
-        while True:
+        rlist, _, _ = select.select([self.mail.sock], [], [], 5)
+        if not rlist:
+            raise IOError("Could not restart Connection.Idle - Could not verify status of connection")
+        msg = self.mail.readline()
+
+        # flushes any remaining messages
+        if msg.startswith(b'* '):
+            attempts = 0
             rlist, _, _ = select.select([self.mail.sock], [], [], 5)
-            if not rlist:
-                raise IOError("Could not restart Connection.Idle - Could not verify status of connection")
-            msg = self.mail.readline()
+            while rlist is not None:
+                if attempts > 10:
+                    raise IOError("Could not restart Connection.Idle - Too many messages after DONE on memoryguard")
+                msg = self.mail.readline()
+                if msg == b'':
+                    break
+                rlist, _, _ = select.select([self.mail.sock], [], [], 1)
+                attempts += 1
 
-            # flushes any remaining messages
-            if msg.startswith(b'* '):
-                attempts = 0
-                rlist, _, _ = select.select([self.mail.sock], [], [], 5)
-                while rlist is not None:
-                    if attempts > 10:
-                        raise IOError("Could not restart Connection.Idle - Too many messages after DONE on memoryguard")
-                    msg = self.mail.readline()
-                    if msg == b'':
-                        break
-                    rlist, _, _ = select.select([self.mail.sock], [], [], 1)
-                    attempts += 1
-
-            self.login()
-            self.mail.send(idlecmd)
-            first_response = self.mail.readline()
-            if first_response != b"+ idling\r\n":
-                raise IOError(f"Unable to restart idle after memoryguard/timeout - idle response: {first_response}")
-            break
+        self.login()
+        self.mail.send(idlecmd)
+        first_response = self.mail.readline()
+        if first_response != b"+ idling\r\n":
+            raise IOError(f"Unable to restart idle after memoryguard/timeout - idle response: {first_response}")
