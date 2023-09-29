@@ -115,6 +115,10 @@ class Connection:
         return unsolicted
 
     def _flush_for_done(self, tag: bytes, unsolicted: list[bytes], logger: "Logger"=...) -> None:
+        """
+        Flushes the unsolicted messages until the DONE message is found.
+        Unsolicited messages are stored in the unsolicted list passed by reference.
+        """
         memoryguard = 0
         while True:
             if unsolicted[-1].startswith(tag):
@@ -133,7 +137,7 @@ class Connection:
     def _restart_idle(self, idlecmd: bytes) -> None:
         rlist, _, _ = select.select([self.mail.sock], [], [], 5)
         if not rlist:
-            raise IOError("Could not restart Connection.Idle - Could not verify status of connection")
+            raise IOError("Could not restart Connection.Idle - No response from server")
         msg = self.mail.readline()
 
         # flushes any remaining messages
@@ -142,7 +146,7 @@ class Connection:
             rlist, _, _ = select.select([self.mail.sock], [], [], 5)
             while rlist is not None:
                 if attempts > 10:
-                    raise IOError("Could not restart Connection.Idle - Too many messages after DONE on memoryguard")
+                    raise IOError("Could not restart Connection.Idle - Too many messages after memoryguard DONE")
                 msg = self.mail.readline()
                 if msg == b'':
                     break
