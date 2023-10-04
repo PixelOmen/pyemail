@@ -1,16 +1,13 @@
 import select
 import imaplib
 from email import message_from_bytes
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from logging import Logger
     from threading import Event
     from email.message import Message
 
-class IdleTimeout(Exception):
-    def __call__(self, msg: str="") -> Any:
-        return super().__init__(msg)
 
 class Connection:
     def __init__(self, user: str, pw: str, server: str, mailbox: str="INBOX") -> None:
@@ -66,20 +63,52 @@ class Connection:
             return None
         return message_from_bytes(data[0][1]) #type: ignore
 
-    def idle(self, stopevent: "Event", tag: bytes=b"A001", logger: "Logger"=...) -> list[bytes]:
-        idlecmd = tag + b" IDLE\r\n"
+    def idle(self, stopevent: "Event", idletag: bytes=b"A001",
+             idle_poll: int = 1, noop_interval: int = 1800, logger: "Logger"=...) -> list[bytes]:
+        idlecmd = idletag + b" IDLE\r\n"
         self.mail.send(idlecmd)
         first_response = self.mail.readline()
         if first_response != b"+ idling\r\n":
             raise IOError(f"Didn't enter idle: {first_response}")
         
         unsolicted = []
+        counter = 0
         while not stopevent.is_set():
-            rlist, _, _ = select.select([self.mail.sock], [], [], 1)
+            rlist, _, _ = select.select([self.mail.sock], [], [], idle_poll)
             if not rlist:
-                continue
+                if counter < noop_interval:
+                    counter += idle_poll
+                    continue
+                if logger is not ...:
+                    logger.debug("Connection.idle: Attempting noop")
+                self.mail.send(b"DONE\r\n")
+                if not self.mail.readline().startswith(idletag):
+                    try:
+                        self._flush_for_done(idletag, unsolicted, logger)
+                    except IOError:
+                        try:
+                            self._restart_idle(idlecmd)
+                        except IOError as e:
+                            if logger is not ...:
+                                logger.critical(e)
+                            raise e
+                else:
+                    res, msg = self.mail.noop()
+                    if res != "OK":
+                        if logger is not ...:
+                            logger.critical(f"Connection.idle: NOOP failed: {msg}")
+                        raise IOError(f"Connection.idle: NOOP failed: {msg}")
+                    self.mail.send(idlecmd)
+                    first_response = self.mail.readline()
+                    if first_response != b"+ idling\r\n":
+                        raise IOError(f"Did not enter idle: {first_response}")
+                    elif logger is not ...:
+                        logger.debug("Connection.idle: Idle successfuly restarted after noop")
+                    counter = 0
+                    continue
+            
+            counter = 0
             unsolicted = [self.mail.readline()]
-
             if unsolicted[-1].startswith(b'* '):
                 if unsolicted[-1] == b'* BYE connection timed out\r\n':
                     if logger is not ...:
@@ -97,7 +126,7 @@ class Connection:
 
                 self.mail.send(b"DONE\r\n")
                 try:
-                    self._flush_for_done(tag, unsolicted, logger)
+                    self._flush_for_done(idletag, unsolicted, logger)
                 except IOError:
                     unsolicted = []
                     try:
