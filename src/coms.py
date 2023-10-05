@@ -63,8 +63,8 @@ class Connection:
             return None
         return message_from_bytes(data[0][1]) #type: ignore
 
-    def idle(self, stopevent: "Event", idletag: bytes=b"A001",
-             idle_poll: int = 1, noop_interval: int = 1800, logger: "Logger"=...) -> list[bytes]:
+    def idle(self, stopevent: "Event", idletag: bytes = b"A001",
+             idle_poll: int = 1, noop_interval: int = 1800, logger: Union["Logger", None] = None) -> list[bytes]:
         idlecmd = idletag + b" IDLE\r\n"
         self.mail.send(idlecmd)
         first_response = self.mail.readline()
@@ -79,7 +79,7 @@ class Connection:
                 if counter < noop_interval:
                     counter += idle_poll
                     continue
-                if logger is not ...:
+                if logger is not None:
                     logger.debug("Connection.idle: Attempting noop")
                 self.mail.send(b"DONE\r\n")
                 if not self.mail.readline().startswith(idletag):
@@ -89,20 +89,20 @@ class Connection:
                         try:
                             self._restart_idle(idlecmd)
                         except IOError as e:
-                            if logger is not ...:
+                            if logger is not None:
                                 logger.critical(e)
                             raise e
                 else:
                     res, msg = self.mail.noop()
                     if res != "OK":
-                        if logger is not ...:
+                        if logger is not None:
                             logger.critical(f"Connection.idle: NOOP failed: {msg}")
                         raise IOError(f"Connection.idle: NOOP failed: {msg}")
                     self.mail.send(idlecmd)
                     first_response = self.mail.readline()
                     if first_response != b"+ idling\r\n":
                         raise IOError(f"Did not enter idle: {first_response}")
-                    elif logger is not ...:
+                    elif logger is not None:
                         logger.debug("Connection.idle: Idle successfuly restarted after noop")
                     counter = 0
                     continue
@@ -111,16 +111,16 @@ class Connection:
             unsolicted = [self.mail.readline()]
             if unsolicted[-1].startswith(b'* '):
                 if unsolicted[-1] == b'* BYE connection timed out\r\n':
-                    if logger is not ...:
+                    if logger is not None:
                         logger.debug("Idle timed out")
                     try:
                         self._restart_idle(idlecmd)
                     except IOError as e:
-                        if logger is not ...:
+                        if logger is not None:
                             logger.critical(e)
                         raise e
                     else:
-                        if logger is not ...:
+                        if logger is not None:
                             logger.debug("Idle restarted after timeout")
                     continue
 
@@ -132,18 +132,18 @@ class Connection:
                     try:
                         self._restart_idle(idlecmd)
                     except IOError as e:
-                        if logger is not ...:
+                        if logger is not None:
                             logger.critical(e)
                         raise e
                     else:
-                        if logger is not ...:
+                        if logger is not None:
                             logger.info("Idle restarted after memoryguard")
                     continue
 
                 break
         return unsolicted
 
-    def _flush_for_done(self, tag: bytes, unsolicted: list[bytes], logger: "Logger"=...) -> None:
+    def _flush_for_done(self, tag: bytes, unsolicted: list[bytes], logger: Union["Logger", None] = None) -> None:
         """
         Flushes the unsolicted messages until the DONE message is found.
         Unsolicited messages are stored in the unsolicted list passed by reference.
@@ -154,7 +154,7 @@ class Connection:
                 unsolicted.pop()
                 break
             if memoryguard > 10000:
-                if logger is not ...:
+                if logger is not None:
                     logger.warning("pyemail.Connection.idle - Memoryguard triggered")
                     logger.debug("Unsolicted messages:")
                     for msg in unsolicted:
