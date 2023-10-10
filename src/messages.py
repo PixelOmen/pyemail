@@ -54,11 +54,23 @@ class PyMsg:
         self.sender = str(self.message.get('From', ""))
         self.subject = str(self.message.get('Subject', ""))
         self._rawdate = str(self.message.get('Date', ""))
-        body = self.message.get_payload(decode=True)
+        body = None
+        if self.message.is_multipart():
+            for part in self.message.walk():
+                content_type = part.get_content_type()
+                content_disposition = str(part.get("Content-Disposition"))
+                if content_type == "text/plain" and 'attachment' not in content_disposition:
+                    raw = part.get_payload(decode=True)
+                    body = raw.decode("utf-8", errors="replace").replace("\r\n", "\n")
+                    break
+        else:
+            raw = self.message.get_payload(decode=True)
+            body = raw.decode("utf-8", errors="replace").replace("\r\n", "\n")
+            
         if body is None:
             self.body = ""
         else:
-            self.body = body.decode("utf-8").replace("\r\n", "\n")
+            self.body = body
 
     def pull(self, retry: bool=False) -> None:
         if self._pulled and not retry:
