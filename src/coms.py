@@ -160,6 +160,11 @@ class Connection:
                     for msg in unsolicted:
                         logger.debug(msg)
                 raise IOError("Memoryguard triggered")
+            rlist, _, _ = select.select([self.mail.sock], [], [], 5)
+            if not rlist:
+                if logger is not None:
+                    logger.warning("Connection._flush_for_done: Timeout - No response from server")
+                raise IOError("Connection._flush_for_done: Timeout - No response from server")
             unsolicted.append(self.mail.readline())
             memoryguard += 1
 
