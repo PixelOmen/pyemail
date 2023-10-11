@@ -11,11 +11,11 @@ class PyMsg:
         if not self.id.isdigit():
             raise ValueError("Email ID must be a number")
         self.connection = con
-        self.recipients = []
-        self.sender = ""
-        self.subject = ""
-        self.body = ""
         self.deleted: bool = False
+        self._recipients = []
+        self._sender = ""
+        self._subject = ""
+        self._body = ""
         self._rawdate = ""
         self._date: datetime | None = None
         self._message: Union["Message", None] = None
@@ -46,13 +46,37 @@ class PyMsg:
             raise ValueError(f"Email does not exist - {self.id}")
         self._date = email.utils.parsedate_to_datetime(self._rawdate).replace(tzinfo=None)
         return self._date
+
+    @property
+    def recipients(self) -> list[str]:
+        if not self.exists:
+            raise ValueError(f"Email does not exist - {self.id}")
+        return self._recipients
+
+    @property
+    def sender(self) -> str:
+        if not self.exists:
+            raise ValueError(f"Email does not exist - {self.id}")
+        return self._sender
+    
+    @property
+    def subject(self) -> str:
+        if not self.exists:
+            raise ValueError(f"Email does not exist - {self.id}")
+        return self._subject
+
+    @property
+    def body(self) -> str:
+        if not self.exists:
+            raise ValueError(f"Email does not exist - {self.id}")
+        return self._body
     
     def _parse_msg(self) -> None:
         if not self.exists:
             return
-        self.recipients = [str(result) for result in self.message.get_all('To', [])]
-        self.sender = str(self.message.get('From', ""))
-        self.subject = str(self.message.get('Subject', ""))
+        self._recipients = [str(result) for result in self.message.get_all('To', [])]
+        self._sender = str(self.message.get('From', ""))
+        self._subject = str(self.message.get('Subject', ""))
         self._rawdate = str(self.message.get('Date', ""))
         body = None
         if self.message.is_multipart():
@@ -68,9 +92,9 @@ class PyMsg:
             body = raw.decode("utf-8", errors="replace").replace("\r\n", "\n")
             
         if body is None:
-            self.body = ""
+            self._body = ""
         else:
-            self.body = body
+            self._body = body
 
     def pull(self, retry: bool=False) -> None:
         if self._pulled and not retry:
