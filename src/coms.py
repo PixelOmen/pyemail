@@ -88,6 +88,7 @@ class Connection:
                     except IOError:
                         try:
                             self._restart_idle(idlecmd)
+                            continue
                         except IOError as e:
                             if logger is not None:
                                 logger.critical(e)
