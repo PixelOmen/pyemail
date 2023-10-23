@@ -109,7 +109,8 @@ class Connection:
                     continue
             
             counter = 0
-            unsolicted = [self.mail.readline()]
+            if not unsolicted:
+                unsolicted = [self.mail.readline()]
             if unsolicted[-1].startswith(b'* '):
                 if unsolicted[-1] == b'* BYE connection timed out\r\n':
                     if logger is not None:
