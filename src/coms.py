@@ -201,15 +201,18 @@ class IMAPConn:
             raise IOError(f"Unable to restart idle after memoryguard/timeout - idle response: {first_response}")
 
 
+
+
+
 class SMTPConn:
     def __init__(self, user: str, pw: str, server: str):
         self.user = user
         self.pw = pw
         self.server = server
-        self._connection: smtplib.SMTP_SSL | None = None
+        self._connection: smtplib.SMTP | None = None
 
     @property
-    def conn(self) -> smtplib.SMTP_SSL:
+    def conn(self) -> smtplib.SMTP:
         if self._connection is None:
             self.login()
         return self._connection #type: ignore
@@ -220,7 +223,7 @@ class SMTPConn:
                 self.quit()
             except:
                 pass
-        self._connection = smtplib.SMTP_SSL(self.server, 587)
+        self._connection = smtplib.SMTP(self.server, 587)
         self._connection.starttls()
         self._connection.login(self.user, self.pw)
     
