@@ -3,10 +3,10 @@ from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from datetime import datetime
-    from .coms import Connection, Message
+    from .coms import IMAPConn, Message
 
 class PyMsg:
-    def __init__(self, id: str, con: "Connection") -> None:
+    def __init__(self, id: str, con: "IMAPConn") -> None:
         self.id = id
         if not self.id.isdigit():
             raise ValueError("Email ID must be a number")
@@ -111,6 +111,6 @@ class PyMsg:
         self.connection.mark_unread(self.id)
 
     def delete(self) -> None:
-        self.connection.mail.store(self.id, '+FLAGS', '\\Deleted')
-        self.connection.mail.expunge()
+        self.connection.conn.store(self.id, '+FLAGS', '\\Deleted')
+        self.connection.conn.expunge()
         self.deleted = True

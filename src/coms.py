@@ -1,7 +1,12 @@
 import select
 import imaplib
-from email import message_from_bytes
+import smtplib
+from pathlib import Path
 from typing import TYPE_CHECKING, Union
+from email import encoders, message_from_bytes
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
 
 if TYPE_CHECKING:
     from logging import Logger
@@ -9,7 +14,7 @@ if TYPE_CHECKING:
     from email.message import Message
 
 
-class Connection:
+class IMAPConn:
     def __init__(self, user: str, pw: str, server: str, mailbox: str="INBOX") -> None:
         self.user: str = user
         self.pw: str = pw
@@ -18,7 +23,7 @@ class Connection:
         self._connection: imaplib.IMAP4_SSL | None = None
 
     @property
-    def mail(self) -> imaplib.IMAP4_SSL:
+    def conn(self) -> imaplib.IMAP4_SSL:
         if self._connection is None:
             self.login()
         return self._connection #type: ignore
@@ -48,17 +53,17 @@ class Connection:
             search_flag = "UNSEEN"
         else:
             search_flag = "ALL"
-        email_data: list[bytes] = self.mail.search(None, search_flag)[1]
+        email_data: list[bytes] = self.conn.search(None, search_flag)[1]
         return [email_id.decode() for email_id in email_data[0].split()]
     
     def mark_read(self, email_id: str) -> None:
-        self.mail.store(email_id, '+FLAGS', '\\Seen')
+        self.conn.store(email_id, '+FLAGS', '\\Seen')
 
     def mark_unread(self, email_id: str) -> None:
-        self.mail.store(email_id, '-FLAGS', '\\Seen')
+        self.conn.store(email_id, '-FLAGS', '\\Seen')
 
     def get_email(self, email_id: str) -> Union["Message", None]:
-        _, data = self.mail.fetch(email_id, '(RFC822)')
+        _, data = self.conn.fetch(email_id, '(RFC822)')
         if not data[0]:
             return None
         return message_from_bytes(data[0][1]) #type: ignore
@@ -66,23 +71,23 @@ class Connection:
     def idle(self, stopevent: "Event", idletag: bytes = b"A001",
              idle_poll: int = 1, noop_interval: int = 1800, logger: Union["Logger", None] = None) -> list[bytes]:
         idlecmd = idletag + b" IDLE\r\n"
-        self.mail.send(idlecmd)
-        first_response = self.mail.readline()
+        self.conn.send(idlecmd)
+        first_response = self.conn.readline()
         if first_response != b"+ idling\r\n":
             raise IOError(f"Didn't enter idle: {first_response}")
         
         unsolicted = []
         counter = 0
         while not stopevent.is_set():
-            rlist, _, _ = select.select([self.mail.sock], [], [], idle_poll)
+            rlist, _, _ = select.select([self.conn.sock], [], [], idle_poll)
             if not rlist:
                 if counter < noop_interval:
                     counter += idle_poll
                     continue
                 if logger is not None:
                     logger.debug("Connection.idle: Attempting noop")
-                self.mail.send(b"DONE\r\n")
-                if not self.mail.readline().startswith(idletag):
+                self.conn.send(b"DONE\r\n")
+                if not self.conn.readline().startswith(idletag):
                     try:
                         self._flush_for_done(idletag, unsolicted, logger)
                     except IOError:
@@ -94,13 +99,13 @@ class Connection:
                                 logger.critical(e)
                             raise e
                 else:
-                    res, msg = self.mail.noop()
+                    res, msg = self.conn.noop()
                     if res != "OK":
                         if logger is not None:
                             logger.critical(f"Connection.idle: NOOP failed: {msg}")
                         raise IOError(f"Connection.idle: NOOP failed: {msg}")
-                    self.mail.send(idlecmd)
-                    first_response = self.mail.readline()
+                    self.conn.send(idlecmd)
+                    first_response = self.conn.readline()
                     if first_response != b"+ idling\r\n":
                         raise IOError(f"Did not enter idle: {first_response}")
                     elif logger is not None:
@@ -110,7 +115,7 @@ class Connection:
             
             counter = 0
             if not unsolicted:
-                unsolicted = [self.mail.readline()]
+                unsolicted = [self.conn.readline()]
             if unsolicted[-1].startswith(b'* '):
                 if unsolicted[-1] == b'* BYE connection timed out\r\n':
                     if logger is not None:
@@ -126,7 +131,7 @@ class Connection:
                             logger.debug("Idle restarted after timeout")
                     continue
 
-                self.mail.send(b"DONE\r\n")
+                self.conn.send(b"DONE\r\n")
                 try:
                     self._flush_for_done(idletag, unsolicted, logger)
                 except IOError:
@@ -162,35 +167,87 @@ class Connection:
                     for msg in unsolicted:
                         logger.debug(msg)
                 raise IOError("Memoryguard triggered")
-            rlist, _, _ = select.select([self.mail.sock], [], [], 5)
+            rlist, _, _ = select.select([self.conn.sock], [], [], 5)
             if not rlist:
                 if logger is not None:
                     logger.warning("Connection._flush_for_done: Timeout - No response from server")
                 raise IOError("Connection._flush_for_done: Timeout - No response from server")
-            unsolicted.append(self.mail.readline())
+            unsolicted.append(self.conn.readline())
             memoryguard += 1
 
     def _restart_idle(self, idlecmd: bytes) -> None:
-        rlist, _, _ = select.select([self.mail.sock], [], [], 5)
+        rlist, _, _ = select.select([self.conn.sock], [], [], 5)
         if not rlist:
             raise IOError("Could not restart Connection.Idle - No response from server")
-        msg = self.mail.readline()
+        msg = self.conn.readline()
 
         # flushes any remaining messages
         if msg.startswith(b'* '):
             attempts = 0
-            rlist, _, _ = select.select([self.mail.sock], [], [], 5)
+            rlist, _, _ = select.select([self.conn.sock], [], [], 5)
             while rlist is not None:
                 if attempts > 10:
                     raise IOError("Could not restart Connection.Idle - Too many messages after memoryguard DONE")
-                msg = self.mail.readline()
+                msg = self.conn.readline()
                 if msg == b'':
                     break
-                rlist, _, _ = select.select([self.mail.sock], [], [], 1)
+                rlist, _, _ = select.select([self.conn.sock], [], [], 1)
                 attempts += 1
 
         self.login()
-        self.mail.send(idlecmd)
-        first_response = self.mail.readline()
+        self.conn.send(idlecmd)
+        first_response = self.conn.readline()
         if first_response != b"+ idling\r\n":
             raise IOError(f"Unable to restart idle after memoryguard/timeout - idle response: {first_response}")
+
+
+class SMTPConn:
+    def __init__(self, user: str, pw: str, server: str):
+        self.user = user
+        self.pw = pw
+        self.server = server
+        self._connection: smtplib.SMTP_SSL | None = None
+
+    @property
+    def conn(self) -> smtplib.SMTP_SSL:
+        if self._connection is None:
+            self.login()
+        return self._connection #type: ignore
+
+    def login(self) -> None:
+        if self._connection is not None:
+            try:
+                self.quit()
+            except:
+                pass
+        self._connection = smtplib.SMTP_SSL(self.server, 587)
+        self._connection.starttls()
+        self._connection.login(self.user, self.pw)
+    
+    def quit(self) -> None:
+        if self._connection is None:
+            return
+        self._connection.quit()
+        self._connection = None
+
+    def send_email(self, recipients: list[str], cc: list[str] | None = None,
+                   subject: str = "", body: str = "", filepath: Path | None = None):
+        msg = MIMEMultipart()
+        msg['From'] = self.user
+        msg['To'] = ",".join(recipients)
+        if cc is not None:
+            msg['Cc'] = ",".join(cc)
+        msg['Subject'] = subject
+        
+        msg.attach(MIMEText(body, 'plain'))
+        
+        if filepath is not None:
+            attachment = open(filepath, "rb")
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(attachment.read())
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', "attachment; filename= %s" % filepath)
+            msg.attach(part)
+        
+        text = msg.as_string()
+        self.conn.sendmail(self.user, recipients, text)
