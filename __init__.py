@@ -1,2 +1,2 @@
 from .src.messages import PyMsg
-from .src.coms import IMAPConn
+from .src.coms import IMAPConn, SMTPConn
