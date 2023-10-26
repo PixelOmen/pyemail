@@ -249,8 +249,12 @@ class SMTPConn:
             part = MIMEBase('application', 'octet-stream')
             part.set_payload(attachment.read())
             encoders.encode_base64(part)
-            part.add_header('Content-Disposition', "attachment; filename= %s" % filepath)
+            part.add_header('Content-Disposition', "attachment; filename= %s" % filepath.name)
             msg.attach(part)
         
         text = msg.as_string()
-        self.conn.sendmail(self.user, recipients, text)
+        if cc is not None:
+            all_recipients = recipients + cc
+        else:
+            all_recipients = recipients
+        self.conn.sendmail(self.user, all_recipients, text)
