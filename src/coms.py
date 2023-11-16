@@ -87,7 +87,9 @@ class IMAPConn:
                 if logger is not None:
                     logger.debug("Connection.idle: Attempting noop")
                 self.conn.send(b"DONE\r\n")
-                if not self.conn.readline().startswith(idletag):
+                first_response = self.conn.readline()
+                if not first_response.startswith(idletag):
+                    unsolicted = [first_response]
                     try:
                         self._flush_for_done(idletag, unsolicted, logger)
                     except IOError:
@@ -107,7 +109,7 @@ class IMAPConn:
                     self.conn.send(idlecmd)
                     first_response = self.conn.readline()
                     if first_response != b"+ idling\r\n":
-                        raise IOError(f"Did not enter idle: {first_response}")
+                        raise IOError(f"Connection.idle: Did not enter idle: {first_response}")
                     elif logger is not None:
                         logger.debug("Connection.idle: Idle successfuly restarted after noop")
                     counter = 0
@@ -157,10 +159,10 @@ class IMAPConn:
         """
         memoryguard = 0
         while True:
-            if unsolicted[-1].startswith(tag):
+            if len(unsolicted) > 0 and unsolicted[-1].startswith(tag):
                 unsolicted.pop()
                 break
-            if memoryguard > 10000:
+            if memoryguard > 1000:
                 if logger is not None:
                     logger.warning("pyemail.Connection.idle - Memoryguard triggered")
                     logger.debug("Unsolicted messages:")
