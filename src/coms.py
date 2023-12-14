@@ -72,6 +72,8 @@ class IMAPConn:
              idle_poll: int = 1, noop_interval: int = 1800, logger: Union["Logger", None] = None) -> list[bytes]:
         idlecmd = idletag + b" IDLE\r\n"
         self.conn.send(idlecmd)
+        if logger:
+            logger.debug("Connection.idle: Readline on socket, line 77")
         first_response = self.conn.readline()
         if first_response != b"+ idling\r\n":
             raise IOError(f"Didn't enter idle: {first_response}")
@@ -86,6 +88,7 @@ class IMAPConn:
                     continue
                 if logger is not None:
                     logger.debug("Connection.idle: Attempting noop")
+                    logger.debug("Connection.idle: Readline on socket, line 93")
                 self.conn.send(b"DONE\r\n")
                 first_response = self.conn.readline()
                 if not first_response.startswith(idletag):
@@ -94,7 +97,7 @@ class IMAPConn:
                         self._flush_for_done(idletag, unsolicted, logger)
                     except IOError:
                         try:
-                            self._restart_idle(idlecmd)
+                            self._restart_idle(idlecmd, logger)
                             continue
                         except IOError as e:
                             if logger is not None:
@@ -107,6 +110,8 @@ class IMAPConn:
                             logger.critical(f"Connection.idle: NOOP failed: {msg}")
                         raise IOError(f"Connection.idle: NOOP failed: {msg}")
                     self.conn.send(idlecmd)
+                    if logger:
+                        logger.debug("Connection.idle: Readline on socket, line 115")
                     first_response = self.conn.readline()
                     if first_response != b"+ idling\r\n":
                         raise IOError(f"Connection.idle: Did not enter idle: {first_response}")
@@ -117,13 +122,15 @@ class IMAPConn:
             
             counter = 0
             if not unsolicted:
+                if logger:
+                    logger.debug("Connection.idle: Readline on socket, line 127")
                 unsolicted = [self.conn.readline()]
             if unsolicted[-1].startswith(b'* '):
                 if unsolicted[-1] == b'* BYE connection timed out\r\n':
                     if logger is not None:
                         logger.debug("Idle timed out")
                     try:
-                        self._restart_idle(idlecmd)
+                        self._restart_idle(idlecmd, logger)
                     except IOError as e:
                         if logger is not None:
                             logger.critical(e)
@@ -139,7 +146,7 @@ class IMAPConn:
                 except IOError:
                     unsolicted = []
                     try:
-                        self._restart_idle(idlecmd)
+                        self._restart_idle(idlecmd, logger)
                     except IOError as e:
                         if logger is not None:
                             logger.critical(e)
@@ -174,13 +181,17 @@ class IMAPConn:
                 if logger is not None:
                     logger.warning("Connection._flush_for_done: Timeout - No response from server")
                 raise IOError("Connection._flush_for_done: Timeout - No response from server")
+            if logger:
+                logger.debug("Connection._flush_for_done: Readline on socket, line 186")
             unsolicted.append(self.conn.readline())
             memoryguard += 1
 
-    def _restart_idle(self, idlecmd: bytes) -> None:
+    def _restart_idle(self, idlecmd: bytes, logger: Union["Logger", None] = None) -> None:
         rlist, _, _ = select.select([self.conn.sock], [], [], 5)
         if not rlist:
             raise IOError("Could not restart Connection.Idle - No response from server")
+        if logger:
+            logger.debug("Connection._restart_idle: Readline on socket, line 195")
         msg = self.conn.readline()
 
         # flushes any remaining messages
@@ -198,6 +209,8 @@ class IMAPConn:
 
         self.login()
         self.conn.send(idlecmd)
+        if logger:
+            logger.debug("Connection._restart_idle: Readline on socket, line 214")
         first_response = self.conn.readline()
         if first_response != b"+ idling\r\n":
             raise IOError(f"Unable to restart idle after memoryguard/timeout - idle response: {first_response}")
