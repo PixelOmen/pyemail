@@ -79,31 +79,20 @@ class IMAPConn:
             raise IOError(f"Didn't enter idle: {first_response}")
         
         unsolicted = []
-        counter = 0
+        noop_counter = 0
         while not stopevent.is_set():
             rlist, _, _ = select.select([self.conn.sock], [], [], idle_poll)
             if not rlist:
-                if counter < noop_interval:
-                    counter += idle_poll
+                if noop_counter < noop_interval:
+                    noop_counter += idle_poll
                     continue
                 if logger is not None:
                     logger.debug("Connection.idle: Attempting noop")
                     logger.debug("Connection.idle: Readline on socket, line 93")
                 self.conn.send(b"DONE\r\n")
                 first_response = self.conn.readline()
-                if not first_response.startswith(idletag):
-                    unsolicted = [first_response]
-                    try:
-                        self._flush_for_done(idletag, unsolicted, logger)
-                    except IOError:
-                        try:
-                            self._restart_idle(idlecmd, logger)
-                            continue
-                        except IOError as e:
-                            if logger is not None:
-                                logger.critical(e)
-                            raise e
-                else:
+
+                if first_response.startswith(idletag):
                     res, msg = self.conn.noop()
                     if res != "OK":
                         if logger is not None:
@@ -117,10 +106,23 @@ class IMAPConn:
                         raise IOError(f"Connection.idle: Did not enter idle: {first_response}")
                     elif logger is not None:
                         logger.debug("Connection.idle: Idle successfuly restarted after noop")
-                    counter = 0
+                    noop_counter = 0
                     continue
+                else:
+                    unsolicted = [first_response]
+                    try:
+                        self._flush_for_tag(idletag, unsolicted, logger)
+                    except IOError:
+                        try:
+                            self._restart_idle(idlecmd, logger)
+                            continue
+                        except IOError as e:
+                            if logger is not None:
+                                logger.critical(e)
+                            raise e
+
             
-            counter = 0
+            noop_counter = 0
             if not unsolicted:
                 if logger:
                     logger.debug("Connection.idle: Readline on socket, line 127")
@@ -142,7 +144,7 @@ class IMAPConn:
 
                 self.conn.send(b"DONE\r\n")
                 try:
-                    self._flush_for_done(idletag, unsolicted, logger)
+                    self._flush_for_tag(idletag, unsolicted, logger)
                 except IOError:
                     unsolicted = []
                     try:
@@ -159,7 +161,7 @@ class IMAPConn:
                 break
         return unsolicted
 
-    def _flush_for_done(self, tag: bytes, unsolicted: list[bytes], logger: Union["Logger", None] = None) -> None:
+    def _flush_for_tag(self, tag: bytes, unsolicted: list[bytes], logger: Union["Logger", None] = None) -> None:
         """
         Flushes the unsolicted messages until the DONE message is found.
         Unsolicited messages are stored in the unsolicted list passed by reference.
@@ -179,10 +181,10 @@ class IMAPConn:
             rlist, _, _ = select.select([self.conn.sock], [], [], 5)
             if not rlist:
                 if logger is not None:
-                    logger.warning("Connection._flush_for_done: Timeout - No response from server")
-                raise IOError("Connection._flush_for_done: Timeout - No response from server")
+                    logger.warning("Connection._flush_for_tag: Timeout - No response from server")
+                raise IOError("Connection._flush_for_tag: Timeout - No response from server")
             if logger:
-                logger.debug("Connection._flush_for_done: Readline on socket, line 186")
+                logger.debug("Connection._flush_for_tag: Readline on socket, line 186")
             unsolicted.append(self.conn.readline())
             memoryguard += 1
 
