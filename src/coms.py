@@ -14,6 +14,12 @@ if TYPE_CHECKING:
     from email.message import Message
 
 
+class MemoryGuard(IOError):
+    def __init__(self, msg: str="", unsolicted: list[bytes] | None = None) -> None:
+        self.unsolicted = unsolicted
+        super().__init__(msg)
+
+
 class IMAPConn:
     def __init__(self, user: str, pw: str, server: str, mailbox: str="INBOX") -> None:
         self.user: str = user
@@ -46,7 +52,7 @@ class IMAPConn:
 
     def get_ids(self, unread_only: bool=False, read_only: bool=False) -> list[str]:
         if unread_only and read_only:
-            raise ValueError("Connection.get_ids: Cannot set both unread_only and read_only to True")
+            raise ValueError("IMAPConn.get_ids: Cannot set both unread_only and read_only to True")
         elif read_only:
             search_flag = "SEEN"
         elif unread_only:
@@ -73,7 +79,7 @@ class IMAPConn:
         idlecmd = idletag + b" IDLE\r\n"
         self.conn.send(idlecmd)
         if logger:
-            logger.debug("Connection.idle: Readline on socket, line 77")
+            logger.debug("IMAPConn.idle: Readline on socket, line 77")
         first_response = self.conn.readline()
         if first_response != b"+ idling\r\n":
             raise IOError(f"Didn't enter idle: {first_response}")
@@ -87,8 +93,8 @@ class IMAPConn:
                     noop_counter += idle_poll
                     continue
                 if logger is not None:
-                    logger.debug("Connection.idle: Attempting noop")
-                    logger.debug("Connection.idle: Readline on socket, line 93")
+                    logger.debug("IMAPConn.idle: Attempting noop")
+                    logger.debug("IMAPConn.idle: Readline on socket, line 93")
                 self.conn.send(b"DONE\r\n")
                 first_response = self.conn.readline()
 
@@ -96,22 +102,30 @@ class IMAPConn:
                     res, msg = self.conn.noop()
                     if res != "OK":
                         if logger is not None:
-                            logger.critical(f"Connection.idle: NOOP failed: {msg}")
-                        raise IOError(f"Connection.idle: NOOP failed: {msg}")
+                            logger.critical(f"IMAPConn.idle: NOOP failed: {msg}")
+                        raise IOError(f"IMAPConn.idle: NOOP failed: {msg}")
                     self.conn.send(idlecmd)
                     if logger:
-                        logger.debug("Connection.idle: Readline on socket, line 115")
+                        logger.debug("IMAPConn.idle: Readline on socket, line 115")
                     first_response = self.conn.readline()
                     if first_response != b"+ idling\r\n":
-                        raise IOError(f"Connection.idle: Did not enter idle: {first_response}")
+                        raise IOError(f"IMAPConn.idle: Did not enter idle: {first_response}")
                     elif logger is not None:
-                        logger.debug("Connection.idle: Idle successfuly restarted after noop")
+                        logger.debug("IMAPConn.idle: Idle successfuly restarted after noop")
                     noop_counter = 0
                     continue
                 else:
                     unsolicted = [first_response]
                     try:
                         self._flush_for_tag(idletag, unsolicted, logger)
+                    except MemoryGuard:
+                        if logger is not None:
+                            logger.error(f"IMAPConn.idle: DONE response lost durring NOOP, breaking IDLE and attempting logout")
+                        try:
+                            self.logout()
+                        except:
+                            pass
+                        break
                     except IOError:
                         try:
                             self._restart_idle(idlecmd, logger)
@@ -125,7 +139,7 @@ class IMAPConn:
             noop_counter = 0
             if not unsolicted:
                 if logger:
-                    logger.debug("Connection.idle: Readline on socket, line 127")
+                    logger.debug("IMAPConn.idle: Readline on socket, line 127")
                 unsolicted = [self.conn.readline()]
             if unsolicted[-1].startswith(b'* '):
                 if unsolicted[-1] == b'* BYE connection timed out\r\n':
@@ -149,6 +163,14 @@ class IMAPConn:
                     unsolicted = []
                     try:
                         self._restart_idle(idlecmd, logger)
+                    except MemoryGuard:
+                        if logger is not None:
+                            logger.error(f"IMAPConn.idle: DONE response lost after IDLE restart following IDLE, breaking IDLE and attempting logout")
+                        try:
+                            self.logout()
+                        except:
+                            pass
+                        break
                     except IOError as e:
                         if logger is not None:
                             logger.critical(e)
@@ -164,27 +186,27 @@ class IMAPConn:
     def _flush_for_tag(self, tag: bytes, unsolicted: list[bytes], logger: Union["Logger", None] = None) -> None:
         """
         Flushes the unsolicted messages until the DONE message is found.
-        Unsolicited messages are stored in the unsolicted list passed by reference.
+        Unsolicited messages are stored in the unsolicted list passed in.
         """
         memoryguard = 0
         while True:
             if len(unsolicted) > 0 and unsolicted[-1].startswith(tag):
                 unsolicted.pop()
                 break
-            if memoryguard > 1000:
+            if memoryguard > 100:
                 if logger is not None:
-                    logger.warning("pyemail.Connection.idle - Memoryguard triggered")
+                    logger.warning("IMAPConn._flush_for_tag - Memoryguard triggered")
                     logger.debug("Unsolicted messages:")
                     for msg in unsolicted:
                         logger.debug(msg)
-                raise IOError("Memoryguard triggered")
+                raise MemoryGuard(unsolicted=unsolicted)
             rlist, _, _ = select.select([self.conn.sock], [], [], 5)
             if not rlist:
                 if logger is not None:
-                    logger.warning("Connection._flush_for_tag: Timeout - No response from server")
-                raise IOError("Connection._flush_for_tag: Timeout - No response from server")
+                    logger.warning("IMAPConn._flush_for_tag: Timeout - No response from server")
+                raise IOError("IMAPConn._flush_for_tag: Timeout - No response from server")
             if logger:
-                logger.debug("Connection._flush_for_tag: Readline on socket, line 186")
+                logger.debug("IMAPConn._flush_for_tag: Readline on socket, line 186")
             unsolicted.append(self.conn.readline())
             memoryguard += 1
 
@@ -193,7 +215,7 @@ class IMAPConn:
         if not rlist:
             raise IOError("Could not restart Connection.Idle - No response from server")
         if logger:
-            logger.debug("Connection._restart_idle: Readline on socket, line 195")
+            logger.debug("IMAPConn._restart_idle: Readline on socket, line 195")
         msg = self.conn.readline()
 
         # flushes any remaining messages
@@ -212,7 +234,7 @@ class IMAPConn:
         self.login()
         self.conn.send(idlecmd)
         if logger:
-            logger.debug("Connection._restart_idle: Readline on socket, line 214")
+            logger.debug("IMAPConn._restart_idle: Readline on socket, line 214")
         first_response = self.conn.readline()
         if first_response != b"+ idling\r\n":
             raise IOError(f"Unable to restart idle after memoryguard/timeout - idle response: {first_response}")
