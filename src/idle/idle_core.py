@@ -1,14 +1,16 @@
 import select
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 from dataclasses import dataclass
 
-from .idle_logging import log_debug, log_info, log_critical, log_warning, log_error
+from .idle_logging import log_debug, log_critical, log_warning, log_error
 
 if TYPE_CHECKING:
     import logging
     import imaplib
     from threading import Event
-    from .core import BufferResponse
+
+BUFFER_SIZE = 4096
+
 
 @dataclass
 class BufferResponse:
@@ -28,7 +30,7 @@ class BufferResponse:
         return not self.buffer and not self.lines
 
 
-def read_buffer(conn: imaplib.IMAP4_SSL, size: int, timeout: int=1) -> BufferResponse:
+def _read_buffer(conn: "imaplib.IMAP4_SSL", size: int, timeout: int=1) -> BufferResponse:
     lines = []
     buffer = b""
     current_timeout = timeout
@@ -47,7 +49,7 @@ def read_buffer(conn: imaplib.IMAP4_SSL, size: int, timeout: int=1) -> BufferRes
 
     return BufferResponse(buffer, lines)
 
-def idle_success(res: BufferResponse) -> bool:
+def _idle_success(res: BufferResponse) -> bool:
     if b"+ idling" in res.buffer:
         return True
     for line in res.lines:
@@ -55,7 +57,7 @@ def idle_success(res: BufferResponse) -> bool:
             return True
     return False
 
-def idle_terminated(res: BufferResponse, tag: bytes) -> bool:
+def _idle_terminated(res: BufferResponse, tag: bytes) -> bool:
     term_msg = tag + b" OK IDLE terminated"
     if term_msg in res.buffer:
         return True
@@ -64,7 +66,7 @@ def idle_terminated(res: BufferResponse, tag: bytes) -> bool:
             return True
     return False
 
-def idle_timeout(res: BufferResponse) -> bool:
+def _idle_timeout(res: BufferResponse) -> bool:
     timeout_msg = b'* BYE '
     if timeout_msg in res.buffer:
         return True
@@ -73,8 +75,8 @@ def idle_timeout(res: BufferResponse) -> bool:
             return True
     return False
 
-def start_idle(conn: imaplib.IMAP4_SSL, e: Event,
-         logger: logging.Logger | None = None, tag: bytes = b"A001") -> BufferResponse:
+def start_idle(conn: "imaplib.IMAP4_SSL", e: "Event", idle_poll: int = 1,
+         logger: Union["logging.Logger", None] = None, tag: bytes = b"A001") -> BufferResponse:
     idlecmd = tag + b" IDLE\r\n"
     is_idle = False
     emtpy_response = BufferResponse(b"", [])
@@ -82,32 +84,39 @@ def start_idle(conn: imaplib.IMAP4_SSL, e: Event,
     while not e.is_set():
         if not is_idle:
             conn.send(idlecmd)
-            response = read_buffer(conn, 4096, timeout=3)
-            if idle_success(response):
+            response = _read_buffer(conn, BUFFER_SIZE, timeout=idle_poll)
+            if _idle_success(response):
                 is_idle = True
-                log_info("IDLE Success", logger)
+                log_debug("IDLE Success", logger)
             else:
                 log_critical("IDLE Failed", logger, response)
                 break
 
-        response = read_buffer(conn, 4096, timeout=3)
-        if idle_timeout(response):
+        response = _read_buffer(conn, BUFFER_SIZE, timeout=idle_poll)
+        if _idle_timeout(response):
             is_idle = False
-            log_warning("IDLE Timeout, attempting new IDLE", logger)
+            log_warning("IDLE timeout, attempting new IDLE", logger)
             continue
-        if idle_terminated(response, tag):
+        if _idle_terminated(response, tag):
             is_idle = False
-            log_critical("IDLE Unexpectedly Terminated", logger)
+            log_critical("IDLE unexpectedly terminated", logger)
             return response
         
         if not response.is_empty():
+            log_debug("Unsolicited response:", logger, response)
+            conn.send(b"DONE\r\n")
+            done_response = _read_buffer(conn, BUFFER_SIZE, timeout=idle_poll)
+            if _idle_terminated(done_response, tag):
+                log_debug("IDLE terminated on unsolicited response", logger)
+            else:
+                log_error("IDLE not terminated on unsolicited response", logger, done_response)
             return response
 
     if is_idle:
         conn.send(b"DONE\r\n")
-        response = read_buffer(conn, 4096, timeout=3)
-        if idle_terminated(response, tag):
-            log_info("IDLE Terminated on event", logger)
+        response = _read_buffer(conn, BUFFER_SIZE, timeout=idle_poll)
+        if _idle_terminated(response, tag):
+            log_debug("IDLE Terminated on event", logger)
         else:
             log_error("IDLE not terminated on event", logger, response)
         return response
