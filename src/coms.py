@@ -139,7 +139,7 @@ class IMAPConn:
             noop_counter = 0
             if not unsolicted:
                 if logger:
-                    logger.debug("IMAPConn.idle: Readline on socket, line 127")
+                    logger.debug("IMAPConn.idle: Readline on socket, line 142")
                 unsolicted = [self.conn.readline()]
             if unsolicted[-1].startswith(b'* '):
                 if unsolicted[-1] == b'* BYE connection timed out\r\n':

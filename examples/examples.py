@@ -52,9 +52,9 @@ def fetch_emails(username: str, password: str, server: str, mailbox: str, count:
                     charset = part.get_content_charset()
                     if charset is None:
                         charset = 'utf-8'
-                    body += part.get_payload(decode=True).decode(charset, errors='replace')
+                    body += part.get_payload(decode=True).decode(charset, errors='replace') #type: ignore
         else:
-            body = email_message.get_payload(decode=True).decode('utf-8')
+            body = email_message.get_payload(decode=True).decode('utf-8') #type: ignore
 
         email_obj = EmailInfo(date, sender, recipients, body)
         emails.append(email_obj)

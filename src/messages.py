@@ -85,11 +85,11 @@ class PyMsg:
                 content_disposition = str(part.get("Content-Disposition"))
                 if content_type == "text/plain" and 'attachment' not in content_disposition:
                     raw = part.get_payload(decode=True)
-                    body = raw.decode("utf-8", errors="replace").replace("\r\n", "\n")
+                    body = raw.decode("utf-8", errors="replace").replace("\r\n", "\n") #type: ignore
                     break
         else:
             raw = self.message.get_payload(decode=True)
-            body = raw.decode("utf-8", errors="replace").replace("\r\n", "\n")
+            body = raw.decode("utf-8", errors="replace").replace("\r\n", "\n") #type: ignore
             
         if body is None:
             self._body = ""
