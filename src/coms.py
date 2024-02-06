@@ -2,10 +2,10 @@ import imaplib
 import smtplib
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
-from email import encoders, message_from_bytes
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
+from email import encoders, message_from_bytes, utils
 
 from .idle import start_idle
 
@@ -114,6 +114,7 @@ class SMTPConn:
         if cc is not None:
             msg['Cc'] = ",".join(cc)
         msg['Subject'] = subject
+        msg['Date'] = utils.formatdate(localtime=True)
         
         msg.attach(MIMEText(body, 'plain'))
         

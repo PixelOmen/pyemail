@@ -70,6 +70,15 @@ class PyMsg:
         if not self.exists:
             raise ValueError(f"Email does not exist - {self.id}")
         return self._body
+
+    def _date_fallback(self) -> str:
+        mdav_processed = self.message.get('X-MDAV-Processed')
+        if mdav_processed:
+            try:
+                return mdav_processed.split(',')[2].strip()
+            except IndexError:
+                return ""
+        return ""
     
     def _parse_msg(self) -> None:
         if not self.exists:
@@ -78,6 +87,8 @@ class PyMsg:
         self._sender = str(self.message.get('From', ""))
         self._subject = str(self.message.get('Subject', ""))
         self._rawdate = str(self.message.get('Date', ""))
+        if not self._rawdate:
+            self._rawdate = self._date_fallback()
         body = None
         if self.message.is_multipart():
             for part in self.message.walk():
