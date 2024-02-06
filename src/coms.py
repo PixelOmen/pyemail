@@ -72,8 +72,20 @@ class IMAPConn:
         return message_from_bytes(data[0][1]) #type: ignore
 
     def idle(self, stopevent: "Event", idletag: bytes = b"A001",
-             idle_poll: int = 1, logger: Union["Logger", None] = None) -> "BufferResponse":
-        return start_idle(self.conn, stopevent, idle_poll, logger, idletag)
+             buffer_timeout: int = 3, refresh_idle: int = 0, logger: Union["Logger", None] = None) -> "BufferResponse":
+        """
+        Sends an `IDLE` command to the IMAP server.
+        `IDLE` is terminated after recieving unsolicated responses from the server or Event `e` has been set.
+        If `refresh_idle` is not 0, `IDLE` will terminate and restart every number of minutes equal to its value.
+        """
+        return start_idle(
+            conn=self.conn,
+            e=stopevent,
+            buffer_timeout=buffer_timeout,
+            refresh_idle=refresh_idle,
+            logger=logger,
+            tag=idletag
+        )
 
 
 

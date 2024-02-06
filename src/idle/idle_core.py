@@ -1,6 +1,7 @@
 import select
-from typing import TYPE_CHECKING, Union
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Union
+from datetime import datetime, timedelta
 
 from .idle_logging import log_debug, log_critical, log_warning, log_error
 
@@ -75,16 +76,45 @@ def _idle_timeout(res: BufferResponse) -> bool:
             return True
     return False
 
-def start_idle(conn: "imaplib.IMAP4_SSL", e: "Event", idle_poll: int = 1,
-         logger: Union["logging.Logger", None] = None, tag: bytes = b"A001") -> BufferResponse:
+def _timer_up(start_time: datetime, timer: timedelta) -> bool:
+    current_time = datetime.now()
+    if current_time >= start_time + timer:
+        return True
+    return False
+
+def start_idle(conn: "imaplib.IMAP4_SSL", e: "Event", buffer_timeout: int = 3, refresh_idle: int = 0,
+                logger: Union["logging.Logger", None] = None, tag: bytes = b"A001") -> BufferResponse:
+    """
+    Sends an `IDLE` command to the IMAP server.
+    `IDLE` is terminated after recieving unsolicated responses from the server or Event `e` has been set.
+    If `refresh_idle` is not 0, `IDLE` will terminate and restart every number of minutes equal to its value.
+    """
+    if refresh_idle < 0:
+        raise ValueError("`refresh_idle` cannot be less than 0")
+    if buffer_timeout < 1:
+        raise ValueError("`buffer_timeout` cannot be less than 1")
     idlecmd = tag + b" IDLE\r\n"
     is_idle = False
-    emtpy_response = BufferResponse(b"", [])
+    start_time = datetime.now()
+    timer = timedelta(minutes=refresh_idle)
+    response = BufferResponse(b"", [])
+
 
     while not e.is_set():
+        if is_idle and refresh_idle > 0 and _timer_up(start_time, timer):
+            is_idle = False
+            start_time = datetime.now()
+            conn.send(b"DONE\r\n")
+            response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout)
+            if _idle_terminated(response, tag):
+                log_debug("IDLE refresh triggered", logger)
+            else:
+                log_error("IDLE not terminated properly on refresh, attempting restart", logger, response)
+            continue
+        
         if not is_idle:
             conn.send(idlecmd)
-            response = _read_buffer(conn, BUFFER_SIZE, timeout=idle_poll)
+            response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout)
             if _idle_success(response):
                 is_idle = True
                 log_debug("IDLE Success", logger)
@@ -92,32 +122,34 @@ def start_idle(conn: "imaplib.IMAP4_SSL", e: "Event", idle_poll: int = 1,
                 log_critical("IDLE Failed", logger, response)
                 break
 
-        response = _read_buffer(conn, BUFFER_SIZE, timeout=idle_poll)
+        response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout)
         if _idle_timeout(response):
             is_idle = False
+            start_time = datetime.now()
             log_warning("IDLE timeout, attempting new IDLE", logger)
             continue
         if _idle_terminated(response, tag):
             is_idle = False
-            log_critical("IDLE unexpectedly terminated", logger)
-            return response
+            start_time = datetime.now()
+            log_critical("IDLE unexpectedly terminated, attempting restart", logger)
+            continue
         
         if not response.is_empty():
             log_debug("Unsolicited response:", logger, response)
             conn.send(b"DONE\r\n")
-            done_response = _read_buffer(conn, BUFFER_SIZE, timeout=idle_poll)
+            done_response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout)
             if _idle_terminated(done_response, tag):
                 log_debug("IDLE terminated on unsolicited response", logger)
             else:
-                log_error("IDLE not terminated on unsolicited response", logger, done_response)
+                log_error("IDLE not terminated properly on unsolicited response", logger, done_response)
             return response
 
     if is_idle:
         conn.send(b"DONE\r\n")
-        response = _read_buffer(conn, BUFFER_SIZE, timeout=idle_poll)
+        response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout)
         if _idle_terminated(response, tag):
             log_debug("IDLE Terminated on event", logger)
         else:
             log_error("IDLE not terminated on event", logger, response)
         return response
-    return emtpy_response
+    return BufferResponse(b"", [])
