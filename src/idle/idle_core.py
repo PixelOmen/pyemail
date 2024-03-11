@@ -163,6 +163,8 @@ def start_idle(conn: "imaplib.IMAP4_SSL", e: Event, buffer_timeout: int = 3, ref
                 log_debug("IDLE terminated on unsolicited response", logger)
             else:
                 log_error("IDLE not terminated properly on unsolicited response", logger, done_response)
+            if not timer_event.is_set():
+                timer_event.set()
             return response
 
     if is_idle:
@@ -172,6 +174,8 @@ def start_idle(conn: "imaplib.IMAP4_SSL", e: Event, buffer_timeout: int = 3, ref
             log_debug("IDLE Terminated on event", logger)
         else:
             log_error("IDLE not terminated on event", logger, response)
+        if not timer_event.is_set():
+            timer_event.set()
         return response
     
     if not timer_event.is_set():
