@@ -1,5 +1,6 @@
 import select
 from dataclasses import dataclass
+from threading import Thread, Event
 from typing import TYPE_CHECKING, Union
 from datetime import datetime, timedelta
 
@@ -8,7 +9,6 @@ from .idle_logging import log_debug, log_critical, log_warning, log_error
 if TYPE_CHECKING:
     import logging
     import imaplib
-    from threading import Event
 
 BUFFER_SIZE = 4096
 
@@ -30,6 +30,21 @@ class BufferResponse:
     def is_empty(self):
         return not self.buffer and not self.lines
 
+
+def _debug_thread(start_time: datetime, timer: timedelta,
+                  timer_event: Event, logger: Union["logging.Logger", None] = None) -> None:
+    timer_event.wait(90)
+    while not timer_event.is_set():
+        if datetime.now() >= start_time + timer:
+            timer_event.wait(30)
+            if not timer_event.is_set():
+                log_critical("Timer did not trigger in main thread", logger)
+            return
+        timer_event.wait(60)
+
+def _start_debug_thread(start_time: datetime, timer: timedelta,
+                        timer_event: Event, logger: Union["logging.Logger", None] = None) -> None:
+    Thread(target=_debug_thread, args=(start_time, timer, timer_event, logger), daemon=True).start()
 
 def _read_buffer(conn: "imaplib.IMAP4_SSL", size: int, timeout: int=1) -> BufferResponse:
     lines = []
@@ -82,7 +97,7 @@ def _timer_up(start_time: datetime, timer: timedelta) -> bool:
         return True
     return False
 
-def start_idle(conn: "imaplib.IMAP4_SSL", e: "Event", buffer_timeout: int = 3, refresh_idle: int = 0,
+def start_idle(conn: "imaplib.IMAP4_SSL", e: Event, buffer_timeout: int = 3, refresh_idle: int = 0,
                 logger: Union["logging.Logger", None] = None, tag: bytes = b"A001") -> BufferResponse:
     """
     Sends an `IDLE` command to the IMAP server.
@@ -97,13 +112,19 @@ def start_idle(conn: "imaplib.IMAP4_SSL", e: "Event", buffer_timeout: int = 3, r
     is_idle = False
     start_time = datetime.now()
     timer = timedelta(minutes=refresh_idle)
+    timer_event = Event()
+    if refresh_idle > 0:
+        _start_debug_thread(start_time, timer, timer_event, logger)
     response = BufferResponse(b"", [])
 
 
     while not e.is_set():
         if is_idle and refresh_idle > 0 and _timer_up(start_time, timer):
             is_idle = False
+            timer_event.set()
+            timer_event = Event()
             start_time = datetime.now()
+            _start_debug_thread(start_time, timer, timer_event, logger)            
             conn.send(b"DONE\r\n")
             response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout)
             if _idle_terminated(response, tag):
