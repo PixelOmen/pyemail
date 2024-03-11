@@ -173,4 +173,7 @@ def start_idle(conn: "imaplib.IMAP4_SSL", e: Event, buffer_timeout: int = 3, ref
         else:
             log_error("IDLE not terminated on event", logger, response)
         return response
+    
+    if not timer_event.is_set():
+        timer_event.set()
     return BufferResponse(b"", [])
