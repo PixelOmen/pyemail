@@ -46,7 +46,8 @@ def _start_debug_thread(start_time: datetime, timer: timedelta,
                         timer_event: Event, logger: Union["logging.Logger", None] = None) -> None:
     Thread(target=_debug_thread, args=(start_time, timer, timer_event, logger), daemon=True).start()
 
-def _read_buffer(conn: "imaplib.IMAP4_SSL", size: int, timeout: int=1) -> BufferResponse:
+def _read_buffer(conn: "imaplib.IMAP4_SSL", size: int, timeout: int=1,
+                 logger: Union["logging.Logger", None] = None) -> BufferResponse:
     lines = []
     buffer = b""
     current_timeout = timeout
@@ -56,12 +57,16 @@ def _read_buffer(conn: "imaplib.IMAP4_SSL", size: int, timeout: int=1) -> Buffer
             break
 
         current_timeout = 0.5
+        log_debug("Starting socket.recv", logger)
         data = conn.sock.recv(size)
+        log_debug("Ended socket.recv", logger)
         buffer += data
 
+        log_debug("Starting buffer line split", logger)
         while b"\r\n" in buffer:
             line, buffer = buffer.split(b"\r\n", 1)
             lines.append(line)
+        log_debug("Ended buffer line split", logger)
 
     return BufferResponse(buffer, lines)
 
@@ -126,7 +131,9 @@ def start_idle(conn: "imaplib.IMAP4_SSL", e: Event, buffer_timeout: int = 3, ref
             start_time = datetime.now()
             _start_debug_thread(start_time, timer, timer_event, logger)            
             conn.send(b"DONE\r\n")
-            response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout)
+            log_debug("Starting _read_buffer on timer reset", logger)
+            response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout, logger=logger)
+            log_debug("Ended _read_buffer on timer reset", logger)
             if _idle_terminated(response, tag):
                 log_debug("IDLE refresh triggered", logger)
             else:
@@ -135,7 +142,9 @@ def start_idle(conn: "imaplib.IMAP4_SSL", e: Event, buffer_timeout: int = 3, ref
         
         if not is_idle:
             conn.send(idlecmd)
-            response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout)
+            log_debug("Starting _read_buffer on NOT is_idle", logger)
+            response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout, logger=logger)
+            log_debug("Ended _read_buffer on NOT is_idle", logger)
             if _idle_success(response):
                 is_idle = True
                 log_debug("IDLE Success", logger)
@@ -143,7 +152,9 @@ def start_idle(conn: "imaplib.IMAP4_SSL", e: Event, buffer_timeout: int = 3, ref
                 log_critical("IDLE Failed", logger, response)
                 break
 
-        response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout)
+        log_debug("Starting _read_buffer on main IDLE loop", logger)
+        response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout, logger=logger)
+        log_debug("Ended _read_buffer on main IDLE loop", logger)
         if _idle_timeout(response):
             is_idle = False
             start_time = datetime.now()
@@ -158,7 +169,7 @@ def start_idle(conn: "imaplib.IMAP4_SSL", e: Event, buffer_timeout: int = 3, ref
         if not response.is_empty():
             log_debug("Unsolicited response:", logger, response)
             conn.send(b"DONE\r\n")
-            done_response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout)
+            done_response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout, logger=logger)
             if _idle_terminated(done_response, tag):
                 log_debug("IDLE terminated on unsolicited response", logger)
             else:
@@ -169,7 +180,9 @@ def start_idle(conn: "imaplib.IMAP4_SSL", e: Event, buffer_timeout: int = 3, ref
 
     if is_idle:
         conn.send(b"DONE\r\n")
-        response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout)
+        log_debug("Starting _read_buffer on final is_idle", logger)
+        response = _read_buffer(conn, BUFFER_SIZE, timeout=buffer_timeout, logger=logger)
+        log_debug("Ended _read_buffer on final is_idle", logger)
         if _idle_terminated(response, tag):
             log_debug("IDLE Terminated on event", logger)
         else:
