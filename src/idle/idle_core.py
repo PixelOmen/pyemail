@@ -60,6 +60,8 @@ def _read_buffer(conn: "imaplib.IMAP4_SSL", size: int, timeout: int=1,
         log_debug("Starting socket.recv", logger)
         data = conn.sock.recv(size)
         log_debug("Ended socket.recv", logger)
+        if not data:
+            break
         buffer += data
 
         log_debug("Starting buffer line split", logger)
