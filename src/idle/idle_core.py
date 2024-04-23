@@ -51,7 +51,7 @@ def _read_buffer(conn: "imaplib.IMAP4_SSL", size: int, timeout: int=1,
     lines = []
     buffer = b""
     current_timeout = timeout
-    max_empty_response = 10
+    max_empty_response = 50
     current_empty_response = 0
     while True:
         ready_to_read, _, _ = select.select([conn.sock], [], [], current_timeout)
